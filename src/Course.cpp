@@ -115,8 +115,8 @@ Course::Course(): m_bIsAutogen(false), m_sPath(""), m_sMainTitle(""),
 	m_sMainTitleTranslit(""), m_sSubTitle(""), m_sSubTitleTranslit(""),
 	m_sScripter(""), m_sDescription(""), m_sBannerPath(""), m_sBackgroundPath(""),
 	m_sCDTitlePath(""), m_sGroupName(""), m_bRepeat(false), m_fGoalSeconds(0),
-	m_bShuffle(false), m_iLives(-1), m_bSortByMeter(false),
-	m_bIncomplete(false), m_vEntries(), m_SortOrder_TotalDifficulty(0),
+	m_bShuffle(false), m_iLives(-1), m_bSortByMeter(false), m_bPooledEntries(false),
+	m_bIncomplete(false), m_vEntries(), m_vEntryPools(), m_SortOrder_TotalDifficulty(0),
 	m_SortOrder_Ranking(0), m_LoadedFromProfile(ProfileSlot_Invalid),
 	m_TrailCache(), m_iTrailCacheSeed(0), m_RadarCache(),
 	m_setStyles(), m_CachedObject()
@@ -447,16 +447,32 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 	RandomGen rnd( GAMESTATE->m_iStageSeed + GetHashForString(m_sMainTitle) );
 
 	vector<CourseEntry> tmp_entries;
-	if( m_bShuffle )
+	if( m_bShuffle || m_bPooledEntries )
 	{
 		/* Always randomize the same way per round.  Otherwise, the displayed course
 		* will change every time it's viewed, and the displayed order will have no
 		* bearing on what you'll actually play. */
 		tmp_entries = m_vEntries;
-		std::shuffle( tmp_entries.begin(), tmp_entries.end(), rnd );
+
+		if ( m_bPooledEntries )
+		{
+			for ( auto& e : tmp_entries )
+			{
+				if ( !e.sSongFromPool.empty() )
+				{
+					auto& pool = m_vEntryPools.at( e.sSongFromPool );
+					e = pool.at( random_up_to(rnd, pool.size()) );
+				}
+			}
+		}
+
+		if ( m_bShuffle )
+		{
+			std::shuffle( tmp_entries.begin(), tmp_entries.end(), rnd );
+		}
 	}
 
-	const vector<CourseEntry> &entries = m_bShuffle ? tmp_entries:m_vEntries;
+	const vector<CourseEntry> &entries = (m_bShuffle || m_bPooledEntries) ? tmp_entries:m_vEntries;
 
 	// This can take some time, so don't fill it out unless we need it.
 	vector<Song*> vSongsByMostPlayed;

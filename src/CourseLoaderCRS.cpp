@@ -63,6 +63,8 @@ bool CourseLoaderCRS::LoadFromMsd( const std::string &sPath, const MsdFile &msd,
 	using std::max;
 	AttackArray attacks;
 	float fGainSeconds = 0;
+	std::vector<CourseEntry>* target = &out.m_vEntries;
+
 	for( unsigned i=0; i<msd.GetNumValues(); i++ )
 	{
 		std::string sValueName = msd.GetParam(i, 0);
@@ -117,6 +119,31 @@ bool CourseLoaderCRS::LoadFromMsd( const std::string &sPath, const MsdFile &msd,
 				}
 				out.m_iCustomMeter[cd] = max( StringToInt(sParams[2]), 0 );
 			}
+		}
+		else if(tagName == "SONGPOOL")
+		{
+			auto& it = out.m_vEntryPools.find(sParams[1]);
+			if( it == out.m_vEntryPools.end() )
+			{
+				out.m_vEntryPools[sParams[1]] = std::vector<CourseEntry>{};
+			}
+			target = &out.m_vEntryPools[sParams[1]];
+		}
+		else if(tagName == "BEGINCOURSE")
+		{
+			target = &out.m_vEntries;
+		}
+		else if(tagName == "FROMPOOL")
+		{
+			CourseEntry entry;
+			if( out.m_vEntryPools.find(sParams[1]) == out.m_vEntryPools.end() )
+			{
+				LOG->UserLog( "Course file", sPath, "refers to invalid song pool: \"%s\"", sParams[1] );
+				continue;
+			}
+			entry.sSongFromPool = sParams[1];
+			out.m_vEntries.push_back( entry );
+			out.m_bPooledEntries = true;
 		}
 
 		else if(tagName == "MODS" )
@@ -341,7 +368,7 @@ bool CourseLoaderCRS::LoadFromMsd( const std::string &sPath, const MsdFile &msd,
 			new_entry.fGainSeconds = fGainSeconds;
 			attacks.clear();
 
-			out.m_vEntries.push_back( new_entry );
+			target->push_back( new_entry );
 		}
 		else if( tagName == "DISPLAYCOURSE" || tagName == "COMBO" || tagName == "COMBOMODE" )
 		{
