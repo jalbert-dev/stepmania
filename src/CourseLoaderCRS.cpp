@@ -125,12 +125,16 @@ bool CourseLoaderCRS::LoadFromMsd( const std::string &sPath, const MsdFile &msd,
 			auto& it = out.m_vEntryPools.find(sParams[1]);
 			if( it == out.m_vEntryPools.end() )
 			{
+				LOG->UserLog("Course file", sPath, "creating new SONGPOOL: \"%s\"", sParams[1]);
 				out.m_vEntryPools[sParams[1]] = std::vector<CourseEntry>{};
 			}
+
+			LOG->UserLog("Course file", sPath, "redirecting target to songpool: \"%s\"", sParams[1]);
 			target = &out.m_vEntryPools[sParams[1]];
 		}
 		else if(tagName == "BEGINCOURSE")
 		{
+			LOG->UserLog("Course file", sPath, "redirecting target to course");
 			target = &out.m_vEntries;
 		}
 		else if(tagName == "FROMPOOL")
@@ -142,6 +146,7 @@ bool CourseLoaderCRS::LoadFromMsd( const std::string &sPath, const MsdFile &msd,
 				continue;
 			}
 			entry.sSongFromPool = sParams[1];
+			LOG->UserLog("Course file", sPath, "pulls from songpool: \"%s\"", sParams[1]);
 			out.m_vEntries.push_back( entry );
 			out.m_bPooledEntries = true;
 		}

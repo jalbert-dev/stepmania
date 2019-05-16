@@ -60,6 +60,10 @@ std::string CourseEntry::GetTextDescription() const
 	{
 		vsEntryDescription.push_back( "Random" );
 	}
+	if( !sSongFromPool.empty() )
+	{
+		vsEntryDescription.push_back( fmt::sprintf("From pool: %s", sSongFromPool) );
+	}
 	if( !songCriteria.m_sGroupName.empty() )
 	{
 		vsEntryDescription.push_back( songCriteria.m_sGroupName );
@@ -445,7 +449,7 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 	// Construct a new Trail, add it to the cache, then return it.
 	// Different seed for each course, but the same for the whole round:
 	RandomGen rnd( GAMESTATE->m_iStageSeed + GetHashForString(m_sMainTitle) );
-
+	
 	vector<CourseEntry> tmp_entries;
 	if( m_bShuffle || m_bPooledEntries )
 	{
@@ -460,8 +464,13 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 			{
 				if ( !e.sSongFromPool.empty() )
 				{
+					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": pool %s", e.sSongFromPool);
 					auto& pool = m_vEntryPools.at( e.sSongFromPool );
-					e = pool.at( random_up_to(rnd, pool.size()) );
+					int idx = random_up_to(rnd, pool.size());
+					e = pool.at( idx );
+					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": yanking song %d from pool %s (size %d)", idx, e.sSongFromPool, pool.size());
+					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": textual orig: %s", pool.at(idx).GetTextDescription());
+					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": textual  new: %s", e.GetTextDescription());
 				}
 			}
 		}
@@ -473,6 +482,8 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 	}
 
 	const vector<CourseEntry> &entries = (m_bShuffle || m_bPooledEntries) ? tmp_entries:m_vEntries;
+	for (auto& e : entries)
+		LOG->UserLog("Course", this->GetDisplayMainTitle(), "final: %s", e.GetTextDescription());
 
 	// This can take some time, so don't fill it out unless we need it.
 	vector<Song*> vSongsByMostPlayed;
@@ -678,7 +689,7 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 	 * empty data. XXX: How can we do this cleanly, without propagating lots of
 	 * otherwise unnecessary data (course entry types, m_bShuffle) to Trail, or
 	 * storing a Course pointer in Trail (yuck)? */
-	if( !AllSongsAreFixed() || m_bShuffle )
+	if( !AllSongsAreFixed() || m_bShuffle || m_bPooledEntries )
 	{
 		trail.m_bRadarValuesCached = true;
 		trail.m_CachedRadarValues = RadarValues();
