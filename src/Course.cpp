@@ -506,9 +506,9 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 	}
 	else
 	{
-		vector<SongAndSteps> vSongAndSteps;
 		for (auto e = entries.begin(); e != entries.end(); ++e)
 		{
+			vector<SongAndSteps> vSongAndSteps;
 			SongAndSteps resolved;	// fill this in
 			SongCriteria soc = e->songCriteria;
 
