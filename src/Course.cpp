@@ -451,29 +451,12 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 	RandomGen rnd( GAMESTATE->m_iStageSeed + GetHashForString(m_sMainTitle) );
 	
 	vector<CourseEntry> tmp_entries;
-	if( m_bShuffle || m_bPooledEntries )
+	if( m_bShuffle)
 	{
 		/* Always randomize the same way per round.  Otherwise, the displayed course
 		* will change every time it's viewed, and the displayed order will have no
 		* bearing on what you'll actually play. */
 		tmp_entries = m_vEntries;
-
-		if ( m_bPooledEntries )
-		{
-			for ( auto& e : tmp_entries )
-			{
-				if ( !e.sSongFromPool.empty() )
-				{
-					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": pool %s", e.sSongFromPool);
-					auto& pool = m_vEntryPools.at( e.sSongFromPool );
-					int idx = random_up_to(rnd, pool.size());
-					e = pool.at( idx );
-					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": yanking song %d from pool %s (size %d)", idx, e.sSongFromPool, pool.size());
-					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": textual orig: %s", pool.at(idx).GetTextDescription());
-					LOG->UserLog("Course", this->GetDisplayMainTitle(), ": textual  new: %s", e.GetTextDescription());
-				}
-			}
-		}
 
 		if ( m_bShuffle )
 		{
@@ -481,7 +464,7 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 		}
 	}
 
-	const vector<CourseEntry> &entries = (m_bShuffle || m_bPooledEntries) ? tmp_entries:m_vEntries;
+	const vector<CourseEntry> &entries = (m_bShuffle) ? tmp_entries:m_vEntries;
 	for (auto& e : entries)
 		LOG->UserLog("Course", this->GetDisplayMainTitle(), "final: %s", e.GetTextDescription());
 
@@ -705,6 +688,41 @@ bool Course::GetTrailUnsorted( StepsType st, CourseDifficulty cd, Trail &trail )
 	return bCourseDifficultyIsSignificant && trail.m_vEntries.size() > 0;
 }
 
+template <typename RejectPred>
+std::vector<SongAndSteps> GetSongAndStepsFor(const CourseEntry& entry, StepsType& st, RejectPred&& rejectIf) {
+	std::vector<SongAndSteps> result;
+	SongCriteria soc = entry.songCriteria;
+
+	Song *pSong = entry.songID.ToSong();
+	if (pSong) {
+		soc.m_bUseSongAllowedList = true;
+		soc.m_vpSongAllowedList.push_back(pSong);
+	}
+	soc.m_Tutorial = SongCriteria::Tutorial_No;
+	soc.m_Locked = SongCriteria::Locked_Unlocked;
+	if (!soc.m_bUseSongAllowedList)
+		soc.m_iMaxStagesForSong = 1;
+
+	StepsCriteria stc = entry.stepsCriteria;
+	stc.m_st = st;
+	stc.m_Locked = StepsCriteria::Locked_Unlocked;
+
+	if (pSong) {
+		StepsUtil::GetAllMatchingEndless(pSong, stc, result);
+	}
+	else {
+		StepsUtil::GetAllMatching(soc, stc, result);
+	}
+
+	// remove any songs rejected by the caller
+	RemoveIf(result, rejectIf);
+	return result;
+}
+
+std::vector<SongAndSteps> GetSongAndStepsFor(const CourseEntry& entry, StepsType& st) {
+	return GetSongAndStepsFor(entry, st, [](const auto&) { return false; });
+}
+
 void Course::GetTrailUnsortedEndless( const vector<CourseEntry> &entries, Trail &trail, StepsType &st, 
 	CourseDifficulty &cd, RandomGen &rnd, bool &bCourseDifficultyIsSignificant ) const
 {
@@ -714,65 +732,78 @@ void Course::GetTrailUnsortedEndless( const vector<CourseEntry> &entries, Trail 
 	vector<SongAndSteps> vSongAndSteps;
 	for (auto e = entries.begin(); e != entries.end(); ++e)
 	{
-
 		SongAndSteps resolved;	// fill this in
-		SongCriteria soc = e->songCriteria;
 
+		if (!e->sSongFromPool.empty()) {
+			// song is pooled; vSongAndSteps needs to be picked from pool entry
+			auto& pool = m_vEntryPools.at(e->sSongFromPool);
 
-		Song *pSong = e->songID.ToSong();
-		if( pSong )
-		{
-			soc.m_bUseSongAllowedList = true;
-			soc.m_vpSongAllowedList.push_back( pSong );
+			std::vector<size_t> indexes;
+			indexes.resize(pool.size());
+			for (int i = 0; i < indexes.size(); i++)
+				indexes[i] = i;
+			// go through pool in random order using index sequence
+			std::shuffle(indexes.begin(), indexes.end(), rnd);
+
+			bool found = false;
+			for (auto& _index : indexes) {
+				auto& pool_entry = pool[_index];
+
+				// get song and steps, rejecting any songs that have already been played
+				vSongAndSteps = GetSongAndStepsFor(pool_entry, st, [&](const SongAndSteps& ss) {
+					return std::find(alreadySelected.begin(), alreadySelected.end(), ss.pSong) != alreadySelected.end();
+					});
+
+				// if there are valid songs left, we've found our result
+				if (!vSongAndSteps.empty()) {
+					found = true;
+					break;
+				}
+			}
+
+			if (!found) {
+				// if there aren't any songs that haven't been played already, just settle for one that isn't the last played
+				for (auto& _index : indexes) {
+					auto& pool_entry = pool[_index];
+
+					vSongAndSteps = GetSongAndStepsFor(pool_entry, st, SongIsEqual(lastSongSelected));
+
+					if (!vSongAndSteps.empty()) {
+						found = true;
+						break;
+					}
+				}
+
+				if (!found) {
+					// just take first thing...
+					vSongAndSteps = GetSongAndStepsFor(pool[indexes[0]], st);
+				}
+			}
 		}
-		soc.m_Tutorial = SongCriteria::Tutorial_No;
-		soc.m_Locked = SongCriteria::Locked_Unlocked;
-		if( !soc.m_bUseSongAllowedList )
-			soc.m_iMaxStagesForSong = 1;
+		else {
+			vSongAndSteps = GetSongAndStepsFor(*e, st);
 
-		StepsCriteria stc = e->stepsCriteria;
-		stc.m_st = st;
-		stc.m_Locked = StepsCriteria::Locked_Unlocked;
-
-		const bool bSameSongCriteria = e != entries.begin() && ( e - 1 )->songCriteria == soc;
-		const bool bSameStepsCriteria = e != entries.begin() && ( e - 1 )->stepsCriteria == stc;
-
-		// If we're doing the same wildcard search as last entry,
-		// we can just reuse the vSongAndSteps vector.
-		if( pSong )
-		{
-			vSongAndSteps.clear();
-			StepsUtil::GetAllMatchingEndless( pSong, stc, vSongAndSteps );
+			// if there are no songs to choose from, abort this CourseEntry
+			if (vSongAndSteps.empty())
+				continue;
 		}
-		else if( vSongAndSteps.empty() || !( bSameSongCriteria && bSameStepsCriteria ) )
-		{
-			vSongAndSteps.clear();
-			StepsUtil::GetAllMatching( soc, stc, vSongAndSteps );
-		}
-
-		// if there are no songs to choose from, abort this CourseEntry
-		if( vSongAndSteps.empty() )
-			continue;
 
 		// if we're doing a RANDOM wildcard search, try to avoid repetition
-		if (vSongAndSteps.size() > 1 && e->songSort == SongSort::SongSort_Randomize)
-		{
+		if (vSongAndSteps.size() > 1 && e->songSort == SongSort::SongSort_Randomize) {
 			// Make a backup of the steplist so we can revert if we overfilter
 			std::vector<SongAndSteps> revertList = vSongAndSteps;
 			// Filter candidate list via blacklist
 			RemoveIf(vSongAndSteps, [&](const SongAndSteps& ss) {
 				return std::find(alreadySelected.begin(), alreadySelected.end(), ss.pSong) != alreadySelected.end();
-			});
+				});
 			// If every candidate is in the blacklist, pick random song that wasn't played last
 			// (Repeat songs may still occur if song after this is fixed; this algorithm doesn't look ahead)
-			if (vSongAndSteps.empty())
-			{
+			if (vSongAndSteps.empty()) {
 				vSongAndSteps = revertList;
 				RemoveIf(vSongAndSteps, SongIsEqual(lastSongSelected));
 
 				// If the song that was played last was the only candidate, give up pick randomly
-				if (vSongAndSteps.empty())
-				{
+				if (vSongAndSteps.empty()) {
 					vSongAndSteps = revertList;
 				}
 			}
